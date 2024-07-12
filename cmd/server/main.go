@@ -19,13 +19,12 @@ type hueBridge struct {
 }
 
 type remoteServerConfig struct {
-	url          string // The URL of the remote server
-	authToken    string // The authentication token for accessing the server
-	isEnabled    bool   // Indicates if the remote server should be used
-	timeout      int    // Timeout in seconds for the server connection
-	retryCount   int    // Number of times to retry connection in case of failure
-	pollInterval int    // Interval in seconds for polling the server for new data
-	logLevel     string // Log level for server communication (e.g., "info", "debug", "error")
+	url        string        // The URL of the remote server
+	authToken  string        // The authentication token for accessing the server
+	isEnabled  bool          // Indicates if the remote server should be used
+	timeout    time.Duration // Timeout in seconds for the server connection
+	retryCount int           // Number of times to retry connection in case of failure
+	logLevel   string        // Log level for server communication (e.g., "info", "debug", "error")
 }
 
 type config struct {
@@ -57,6 +56,7 @@ func main() {
 	flag.BoolVar(&rmtSvrCfg.isEnabled, "remote", false, "Use remote server")
 	flag.StringVar(&rmtSvrCfg.url, "remote-url", "", "URL of the remote server")
 	flag.StringVar(&rmtSvrCfg.authToken, "remote-auth-token", "", "Authorization token for the remote server")
+
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
@@ -97,6 +97,13 @@ func main() {
 			}
 		}
 	}
+
+	// Set Remote Server Configuration
+	rmtSvrCfg.timeout = 5 * time.Second
+	rmtSvrCfg.retryCount = 3
+
+	cfg.remoteServerConfig = rmtSvrCfg
+
 	// Create a new instance of the application struct.
 	app := &application{
 		config: cfg,
