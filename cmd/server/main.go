@@ -1,16 +1,22 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"home-hue-server/internal/service"
 	"log/slog"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/amimof/huego"
+	"github.com/gorilla/websocket"
 )
+
+var stateChannel = make(chan map[string]interface{})
 
 type hueBridge struct {
 	ip       string
@@ -39,6 +45,7 @@ type application struct {
 	logger *slog.Logger
 	hue    *service.Hue
 	groups *[]huego.Group
+	wsConn *websocket.Conn
 }
 
 var version = "1.0.0"
@@ -54,7 +61,7 @@ func main() {
 	flag.StringVar(&cfg.hueBridge.username, "hue-username", "", "Username for the Hue bridge")
 	flag.BoolVar(&discoverBridge, "discover-hue", false, "Discover the IP address of the Hue bridge")
 	flag.BoolVar(&rmtSvrCfg.isEnabled, "remote", false, "Use remote server")
-	flag.StringVar(&rmtSvrCfg.url, "remote-url", "", "URL of the remote server")
+	flag.StringVar(&rmtSvrCfg.url, "remote-url", "localhost:4000", "URL of the remote server")
 	flag.StringVar(&rmtSvrCfg.authToken, "remote-auth-token", "", "Authorization token for the remote server")
 
 	flag.Parse()
@@ -121,10 +128,37 @@ func main() {
 		ErrorLog:     slog.NewLogLogger(logger.Handler(), slog.LevelError),
 	}
 
+	if cfg.remoteServerConfig.isEnabled {
+		go app.wsConnect()
+	}
+
+	// Setup signal handling to gracefully shutdown the application
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
 	fmt.Println("PORT:", cfg.port)
 	logger.Info("Starting server", "port", cfg.port)
-	err = svr.ListenAndServe()
-	logger.Error(err.Error())
-	os.Exit(1)
-	// Call the app's run method to start the HTTP server.
+
+	// Start the HTTP server in a goroutine
+	go func() {
+		if err := svr.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			logger.Error(err.Error())
+			os.Exit(1)
+		}
+	}()
+
+	// Block until a signal is received
+	<-stop
+	logger.Info("Shutting down server...")
+
+	// Create a context with a timeout to allow for graceful shutdown
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Attempt to gracefully shutdown the server
+	if err := svr.Shutdown(ctx); err != nil {
+		logger.Error("Server forced to shutdown:", err)
+	}
+
+	logger.Info("Server exiting")
 }
