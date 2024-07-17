@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/url"
@@ -10,31 +11,15 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-type StateMessage struct {
-	BridgeID string                 `json:"bridge_id"`
-	Data     map[string]interface{} `json:"data"`
-}
-
-type GroupsStateMessage struct {
-	Type string `json:"type"`
-	Data struct {
-		Groups []huego.Group `json:"groups"`
-	} `json:"data"`
-}
-
-type RoomUpdateMessage struct {
-	RoomID string                 `json:"room_id"`
-	Data   map[string]interface{} `json:"data"`
-}
-
-type LightUpdateMessage struct {
-	LightID string                 `json:"light_id"`
-	Data    map[string]interface{} `json:"data"`
-}
-
 type Message struct {
 	Type string      `json:"type"`
 	Data interface{} `json:"data"`
+}
+
+type UpdateMessageData struct {
+	Group      string `json:"group"`
+	IsOn       bool   `json:"isOn"`
+	Brightness *int   `json:"brightness,omitempty"` // HOW TO OMIT IF NOT SET
 }
 
 func (app *application) wsConnect() {
@@ -65,11 +50,15 @@ func (app *application) wsConnect() {
 				}
 
 				app.logger.Info("message received", "type", msg.Type)
+				fmt.Println(msg)
 				switch msg.Type {
 				case "status":
 					app.WriteGroupsStatusToClient()
 				case "update":
-					fmt.Println("Update message received")
+					err = app.UpdateGroup(msg)
+					if err != nil {
+						app.logger.Error("error updating group", "error", err)
+					}
 				}
 			}
 		}()
@@ -93,11 +82,18 @@ func (app *application) wsConnect() {
 	}
 }
 
+type GroupsStateMessage struct {
+	Type string `json:"type"`
+	Data struct {
+		Groups []huego.Group `json:"groups"`
+	} `json:"data"`
+}
+
 // updates app.groups and writes all hue groups to the server via websocket connection
 func (app *application) WriteGroupsStatusToClient() {
 	groups, err := app.hue.Bridge.GetGroups()
 	if err != nil {
-		app.logger.Error("Error getting groups", "error", err)
+		app.logger.Error("error getting groups", "error", err)
 	} else {
 		app.groups = &groups
 	}
@@ -116,5 +112,42 @@ func (app *application) WriteGroupsStatusToClient() {
 		app.logger.Error("write:", err)
 		return
 	}
-	fmt.Println("Sent message:", msg)
+}
+
+func (app *application) UpdateGroup(msg Message) error {
+	var data UpdateMessageData
+	err := app.ConvertMessageData(msg.Data, &data)
+	if err != nil {
+		return err
+	}
+
+	for _, group := range *app.groups {
+		if group.Name == data.Group {
+			if data.IsOn {
+				group.On()
+			} else {
+				group.Off()
+			}
+			if data.Brightness != nil {
+				group.Bri(uint8(*data.Brightness))
+			}
+		}
+	}
+
+	return nil
+}
+
+// ConvertMessageData converts an interface{} to a struct using JSON marshalling and unmarshalling
+func (app *application) ConvertMessageData(input interface{}, output interface{}) error {
+	mData, err := json.Marshal(input)
+	if err != nil {
+		return fmt.Errorf("error marshalling data: %w", err)
+	}
+
+	err = json.Unmarshal(mData, output)
+	if err != nil {
+		return fmt.Errorf("error unmarshalling data: %w", err)
+	}
+
+	return nil
 }
