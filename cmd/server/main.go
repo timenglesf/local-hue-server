@@ -27,17 +27,17 @@ type hueBridge struct {
 type remoteServerConfig struct {
 	url        string        // The URL of the remote server
 	authToken  string        // The authentication token for accessing the server
+	logLevel   string        // Log level for server communication (e.g., "info", "debug", "error")
 	isEnabled  bool          // Indicates if the remote server should be used
 	timeout    time.Duration // Timeout in seconds for the server connection
 	retryCount int           // Number of times to retry connection in case of failure
-	logLevel   string        // Log level for server communication (e.g., "info", "debug", "error")
 }
 
 type config struct {
-	port               int
+	remoteServerConfig remoteServerConfig
 	hueBridge          hueBridge
 	env                string
-	remoteServerConfig remoteServerConfig
+	port               int
 }
 
 type application struct {
@@ -46,6 +46,7 @@ type application struct {
 	hue    *service.Hue
 	groups *[]huego.Group
 	wsConn *websocket.Conn
+	errCh  chan error
 }
 
 var version = "1.0.0"
@@ -117,6 +118,7 @@ func main() {
 		logger: logger,
 		hue:    &hueService,
 		groups: &groups,
+		errCh:  make(chan error),
 	}
 
 	svr := &http.Server{
